@@ -103,14 +103,41 @@ def write_transcript(channel: str, text: str, audio_filename: str):
         f.write(history_line)
 
 
+def get_keypress():
+    """Wait for a single keypress and return it. Cross-platform."""
+    if platform.system() == "Windows":
+        import msvcrt
+        while True:
+            if msvcrt.kbhit():
+                ch = msvcrt.getwch()
+                return ch
+            time.sleep(0.05)
+    else:
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+            return ch
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def record_clip(local_mode: bool, channel: str, whisper_model=None) -> tuple:
-    """Record audio until ENTER is pressed. Returns (filepath, duration, text)."""
+    """Record audio with pause/resume. Returns (filepath, duration, text).
+
+    Controls: SPACE = pause/resume, ENTER = stop
+    """
     frames = []
+    paused = threading.Event()  # Set = paused
 
     def callback(indata, frame_count, time_info, status):
         if status:
             print(f"  (audio status: {status})", file=sys.stderr)
-        frames.append(indata.copy())
+        if not paused.is_set():
+            frames.append(indata.copy())
 
     stream = sd.InputStream(
         samplerate=SAMPLE_RATE,
@@ -121,15 +148,22 @@ def record_clip(local_mode: bool, channel: str, whisper_model=None) -> tuple:
 
     stream.start()
     start_time = time.monotonic()
+    paused_total = 0.0
+    pause_start = None
     stop_event = threading.Event()
 
     def show_timer():
-        phases = ["||", "|", " ", "|"]
         i = 0
         while not stop_event.is_set():
-            elapsed = time.monotonic() - start_time
-            bar = phases[i % len(phases)]
-            print(f"\r  {bar} RECORDING  {elapsed:5.1f}s {bar}  (press ENTER to stop)", end="", flush=True)
+            elapsed = time.monotonic() - start_time - paused_total
+            if pause_start:
+                elapsed -= (time.monotonic() - pause_start)
+            if paused.is_set():
+                print(f"\r  || PAUSED   {elapsed:5.1f}s ||  (SPACE=resume, ENTER=stop) ", end="", flush=True)
+            else:
+                phases = [">>", "> ", "  ", " >"]
+                bar = phases[i % len(phases)]
+                print(f"\r  {bar} REC  {elapsed:5.1f}s {bar}  (SPACE=pause, ENTER=stop)  ", end="", flush=True)
             i += 1
             stop_event.wait(0.25)
         print()
@@ -137,7 +171,23 @@ def record_clip(local_mode: bool, channel: str, whisper_model=None) -> tuple:
     timer = threading.Thread(target=show_timer, daemon=True)
     timer.start()
 
-    input()
+    # Key loop: SPACE toggles pause, ENTER stops
+    while True:
+        ch = get_keypress()
+        if ch in ('\r', '\n'):  # ENTER
+            break
+        elif ch == ' ':  # SPACE
+            if paused.is_set():
+                # Resume
+                paused.clear()
+                if pause_start:
+                    paused_total += time.monotonic() - pause_start
+                    pause_start = None
+            else:
+                # Pause
+                paused.set()
+                pause_start = time.monotonic()
+
     stop_event.set()
     timer.join()
 
@@ -266,8 +316,10 @@ Examples:
     print(f"  Mount:   {VOICE_ROOT}")
     print(f"  Backup:  {get_local_backup_dir()}")
     print("=" * 56)
-    print("\nPress ENTER to start recording, ENTER again to stop.")
-    print("Press Ctrl+C to quit.\n")
+    print("\n  Controls:")
+    print("    ENTER = start/stop recording")
+    print("    SPACE = pause/resume while recording")
+    print("    Ctrl+C = quit\n")
 
     try:
         while True:
