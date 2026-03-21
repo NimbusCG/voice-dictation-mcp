@@ -15,15 +15,17 @@ from pathlib import Path
 import sounddevice as sd
 import soundfile as sf
 
-# Mount point for the remote server's ~/voice/ directory.
-# V: maps to ~/voice/ on the server. Recordings go into V:\incoming\.
-# Override with VOICE_MOUNT_PATH env var.
+# Mount point base for the remote server's ~/voice/incoming/ directory.
+# V: maps to ~/voice/ on the server. Override with VOICE_MOUNT_PATH env var.
 if "VOICE_MOUNT_PATH" in os.environ:
-    MOUNT_PATH = Path(os.environ["VOICE_MOUNT_PATH"])
+    MOUNT_BASE = Path(os.environ["VOICE_MOUNT_PATH"])
 elif platform.system() == "Windows":
-    MOUNT_PATH = Path("V:/incoming")
+    MOUNT_BASE = Path("V:/incoming")
 else:
-    MOUNT_PATH = Path.home() / "voice_incoming" / "incoming"
+    MOUNT_BASE = Path.home() / "voice_incoming" / "incoming"
+
+# Channel is set via --channel arg in main(). Determines subfolder.
+MOUNT_PATH = MOUNT_BASE  # Updated in main() after parsing args
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -128,16 +130,24 @@ def test_mic():
 
 
 def main():
+    global MOUNT_PATH
+
     parser = argparse.ArgumentParser(description="Record voice clips for transcription")
     parser.add_argument("--test", action="store_true", help="Record 2s and play back to test mic")
+    parser.add_argument("--channel", default="default",
+                        help="Target channel (tmux session name). e.g. --channel production-main")
     args = parser.parse_args()
 
     if args.test:
         test_mic()
         return
 
+    # Set mount path to channel subfolder
+    MOUNT_PATH = MOUNT_BASE / args.channel
+    MOUNT_PATH.mkdir(parents=True, exist_ok=True)
+
     if not check_mount():
-        print(f"ERROR: Remote folder not mounted at {MOUNT_PATH}")
+        print(f"ERROR: Remote folder not mounted at {MOUNT_BASE}")
         print()
         if platform.system() == "Windows":
             print("  Mount it with:")
@@ -149,15 +159,16 @@ def main():
         else:
             print("  Mount it with:")
             print(f"    sshfs -o IdentityFile=~/.ssh/cloudgrow-key.pem,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3 \\")
-            print(f"      ubuntu@castellatus.cloudgrow.tech:/home/ubuntu/voice/incoming {MOUNT_PATH}")
+            print(f"      ubuntu@castellatus.cloudgrow.tech:/home/ubuntu/voice/incoming {MOUNT_BASE}")
         print()
         print("  Or set VOICE_MOUNT_PATH to point to your mount.")
         sys.exit(1)
 
     print("=" * 50)
     print("  Voice Recorder")
-    print(f"  Mount:  {MOUNT_PATH}")
-    print(f"  Backup: {get_local_backup_dir()}")
+    print(f"  Channel: {args.channel}")
+    print(f"  Mount:   {MOUNT_PATH}")
+    print(f"  Backup:  {get_local_backup_dir()}")
     print("=" * 50)
     print("\nPress ENTER to start recording, ENTER again to stop.")
     print("Press Ctrl+C to quit.\n")
