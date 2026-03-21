@@ -171,8 +171,10 @@ def record_clip(local_mode: bool, channel: str, whisper_model=None) -> tuple:
 
         if text.strip():
             write_transcript(channel, text.strip(), filename)
-            print(f"  Text:     {text.strip()[:100]}{'...' if len(text.strip()) > 100 else ''}")
             print(f"  Written:  V:\\transcripts\\{channel}\\latest.txt")
+            print(f"  ──────────────────────────────────────────────")
+            print(f"  {text.strip()}")
+            print(f"  ──────────────────────────────────────────────")
         else:
             print("  (no speech detected)")
 
