@@ -2,31 +2,59 @@
 """
 MCP Voice Dictation Server for Claude Code (Channel-aware).
 
-Each Claude Code session can listen on a specific channel.
-Channels map to subfolders in ~/voice/incoming/ and ~/voice/transcripts/.
+Each Claude Code session listens on its own channel, auto-detected from
+the tmux session name. Channels map to subfolders in ~/voice/incoming/
+and ~/voice/transcripts/.
 
 Usage:
-    python3 mcp_voice_server.py                    # default channel
-    python3 mcp_voice_server.py --channel platform  # platform channel
-    python3 mcp_voice_server.py --channel crm       # crm channel
+    python3 mcp_voice_server.py                    # auto-detect from tmux session
+    python3 mcp_voice_server.py --channel platform  # explicit channel override
+
+Channel auto-detection:
+    tmux session "production-main" → channel "production-main"
+    tmux session "monitoring"      → channel "monitoring"
+    no tmux                        → channel "default"
 
 On Windows, record to the matching subfolder:
-    V:\\platform\\voice_20260321.wav  → picked up by --channel platform
-    V:\\crm\\voice_20260321.wav      → picked up by --channel crm
+    V:\\production-main\\voice_20260321.wav  → picked up by session "production-main"
+    V:\\monitoring\\voice_20260321.wav       → picked up by session "monitoring"
 """
 
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# Parse --channel argument
-CHANNEL = "default"
+
+def detect_tmux_session():
+    """Auto-detect tmux session name from environment. Returns session name or 'default'."""
+    # TMUX env var is set when running inside tmux: /tmp/tmux-1000/default,12345,0
+    if not os.environ.get("TMUX"):
+        return "default"
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#S"],
+            capture_output=True, text=True, timeout=2
+        )
+        name = result.stdout.strip()
+        if name:
+            return name
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return "default"
+
+
+# Parse --channel argument, fall back to tmux session auto-detection
+CHANNEL = None
 for i, arg in enumerate(sys.argv[1:], 1):
     if arg == "--channel" and i < len(sys.argv) - 1:
         CHANNEL = sys.argv[i + 1]
         break
+
+if CHANNEL is None:
+    CHANNEL = detect_tmux_session()
 
 VOICE_DIR = Path.home() / "voice"
 TRANSCRIPTS_DIR = VOICE_DIR / "transcripts" / CHANNEL
