@@ -1,0 +1,17 @@
+[Unit]
+Description=Voice Dictation Watcher - Transcribes audio files with Whisper
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Environment=PATH=/home/ubuntu/voice/venv/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/ubuntu/voice
+ExecStart=/bin/bash /home/ubuntu/voice/transcribe_watcher.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
